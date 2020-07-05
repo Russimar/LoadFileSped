@@ -82,6 +82,8 @@ type
    function NumeroDeLinhasTXT(FilePath:String): Integer;
    function ValidaData(aValue : String) : Boolean;
    function StrZero(Valor : string; Quant : Integer): string;
+   function TirarAcento(texto: string): string;
+
   public
     { Public declarations }
     procedure GerarArquivoCobol;
@@ -117,26 +119,33 @@ begin
     while not MemDados.Eof do
     begin
       ProgressBar1.Position := ProgressBar1.Position + 1;
-      xValor := StringReplace(FormatFloat('0.00', MemDadosValorGeral.AsFloat),',','',[rfReplaceAll]);
-      xValor := StrZero(xValor,11);
-      xConta := MemDadosConta.AsString;
-      xData := FormatDateTime('ddmmyyyy', MemDadosDataEmissao.AsDateTime);
-      xTipo := MemDadosEntSai.AsString;
-      xParticipante := memParticipanteNome.AsString;
-      linha := xData +
-               copy(xConta,1,20) +
-               copy(xValor,1,11) +
-               copy(xTipo,1,1) +
-               copy(xParticipante,1,50);
-      Writeln(ArquivoCobol, linha);
+      try
+        xValor := StringReplace(FormatFloat('0.00', MemDadosValorGeral.AsFloat),',','',[rfReplaceAll]);
+        xValor := StrZero(xValor,11);
+        xConta := MemDadosConta.AsString;
+        xData := FormatDateTime('ddmmyyyy', MemDadosDataEmissao.AsDateTime);
+        xTipo := MemDadosEntSai.AsString;
+        if memParticipante.Locate('Codigo',MemDadosCodigoParticipante.AsString) then
+          xParticipante := TirarAcento(memParticipanteNome.AsString)
+        else
+          xParticipante := '';
+        linha := xData +
+                 copy(xConta,1,20) +
+                 copy(xValor,1,11) +
+                 copy(xTipo,1,1) +
+                 copy(xParticipante,1,50);
+        Writeln(ArquivoCobol, linha);
+      Except
+       on E : Exception do
+         ShowMessage('Erro: ' + e.Message + ' chave nota: ' + MemDadosChave.AsString);
+      end;
       MemDados.Next;
     end;
-
-
 
   finally
     MemDados.EnableControls;
     pnlMensagem.Caption := 'Arquivo Gerado com Sucesso!';
+    CloseFile(ArquivoCobol);
   end;
 end;
 
@@ -149,6 +158,7 @@ var
   Gravou : Boolean;
   x, dia, mes, ano : String;
   C100 : TC100;
+  ContAtualiza : Integer;
   function MontaValor : String;
   begin
     Result := '';
@@ -159,6 +169,7 @@ var
     Delete(Linha, 1, i);
   end;
 begin
+  ContAtualiza := 0;
   MemDados.CreateDataSet;
   MemDados.EmptyDataSet;
 
@@ -171,6 +182,12 @@ begin
     Readln(ArquivoSped, Linha);
     while not Eoln(ArquivoSped) do
     begin
+      Inc(ContAtualiza);
+      if ContAtualiza = 1000 then
+      begin
+        ContAtualiza := 0;
+        Application.ProcessMessages;
+      end;
       ProgressBar1.Position := ProgressBar1.Position + 1;
       Registro := copy(Linha,2, 4);
       if registro = '0150' then
@@ -226,7 +243,7 @@ begin
       if Registro = 'C170' then
       begin
         try
-        MemDados.Append;
+          MemDados.Append;
           MemDadosDataEmissao.AsDateTime := C100.Data;
           MemDadosTipo.AsString := C100.Tipo;
           MemDadosCodigoParticipante.AsString := C100.CodigoParticipante;
@@ -301,7 +318,6 @@ begin
     CloseFile(ArquivoSped);
   end;
 
-
 end;
 
 procedure TForm1.MemDadosCalcFields(DataSet: TDataSet);
@@ -332,18 +348,23 @@ begin
   if OpenDialog1.Execute then
   begin
     pnlMensagem.Caption := 'Aguarde...Lendo Arquivo Texto';
+    btnGerar.Enabled := False;
     try
-      pnlMensagem.Update;
-      edtFileName.Text := OpenDialog1.FileName;
-      edtFileName.Update;
-      ProgressBar1.Min := 0;
-      ProgressBar1.Max := NumeroDeLinhasTXT(edtFileName.Text);
-      ImportarArquivo;
-    except
-      pnlMensagem.Caption := 'Erro ao ler o arquivo';
+      try
+        pnlMensagem.Update;
+        edtFileName.Text := OpenDialog1.FileName;
+        edtFileName.Update;
+        ProgressBar1.Min := 0;
+        ProgressBar1.Max := NumeroDeLinhasTXT(edtFileName.Text);
+        ImportarArquivo;
+      except
+         pnlMensagem.Caption := 'Erro ao ler o arquivo';
+      end;
+      pnlMensagem.Caption := 'Arquivo Gerado!';
+      ProgressBar1.Position := 0;
+    finally
+      btnGerar.Enabled := True;
     end;
-    pnlMensagem.Caption := 'Arquivo Gerado!';
-    ProgressBar1.Position := 0;
   end;
 end;
 
@@ -353,6 +374,42 @@ begin
   Quant := Quant - Length(Result);
   if Quant > 0 then
     Result := StringOfChar('0', Quant) + Result;
+end;
+
+function TForm1.TirarAcento(texto: string): string;
+var
+  i: Integer;
+begin
+  //Texto := Trim(AnsiUpperCase(Texto));
+  for i := 1 to Length(texto) do
+  begin
+    if Pos(Texto[i],' 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ`~''"!@#$%^&*()_-+=|/\{}[]:;,.<>øØ') = 0 then
+    begin
+      case Texto[i] of
+        'Á', 'À', 'Â', 'Ä', 'Ã': Texto[i] := 'A';
+        'á', 'à', 'â', 'ä', 'ã': Texto[i] := 'a';
+        'É', 'È', 'Ê', 'Ë': Texto[i] := 'E';
+        'é', 'è', 'ê', 'ë': Texto[i] := 'e';
+        'Í', 'Ì', 'Î', 'Ï': Texto[i] := 'I';
+        'í', 'ì', 'î', 'ï': Texto[i] := 'i';
+        'Ó', 'Ò', 'Ô', 'Ö', 'Õ': Texto[i] := 'O';
+        'ó', 'ò', 'ô', 'ö', 'õ': Texto[i] := 'o';
+        'Ú', 'Ù', 'Û', 'Ü': Texto[i] := 'U';
+        'ú', 'ù', 'û', 'ü': Texto[i] := 'u';
+        'Ç': Texto[i] := 'C';
+        'ç': Texto[i] := 'c';
+        'Ñ': Texto[i] := 'N';
+        'ñ': Texto[i] := 'n';
+        'ø': Texto[i] := 'ø';
+        'Ø': Texto[i] := 'Ø';
+      else
+        Texto[i] := ' ';
+      end;
+    end;
+  end;
+  Texto := StringReplace(Texto, '&', 'e',[rfReplaceAll, rfIgnoreCase]);
+  //Result := AnsiUpperCase(Texto);
+  Result := Texto;
 end;
 
 function TForm1.ValidaData(aValue: String): Boolean;
